@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { divIcon } from 'leaflet'
 import { MapContainer, Marker, Polyline, TileLayer, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import { dijkstra } from '../lib/dijkstra'
 import { fetchRoadGraph, findNearestNode } from '../lib/graph'
 
 // Replace these with the latitude and longitude of your city.
@@ -35,6 +36,7 @@ export default function MapView() {
   const [graph, setGraph] = useState(null)
   const [startNodeId, setStartNodeId] = useState(null)
   const [endNodeId, setEndNodeId] = useState(null)
+  const [route, setRoute] = useState(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -56,8 +58,14 @@ export default function MapView() {
   const nodesById = new Map(graph?.nodes.map((node) => [node.id, node]))
   const startNode = nodesById.get(startNodeId)
   const endNode = nodesById.get(endNodeId)
+  const routePositions = route?.path
+    .map((nodeId) => nodesById.get(nodeId))
+    .filter(Boolean)
+    .map((node) => [node.lat, node.lng])
 
   function handleNodeClick(nodeId) {
+    setRoute(null)
+
     if (!startNodeId) {
       setStartNodeId(nodeId)
     } else if (!endNodeId) {
@@ -69,6 +77,8 @@ export default function MapView() {
     const { lat, lng } = event.target.getLatLng()
     const nearestNode = findNearestNode(graph, lat, lng)
 
+    setRoute(null)
+
     if (nodeType === 'start') {
       setStartNodeId(nearestNode.id)
     } else {
@@ -76,18 +86,38 @@ export default function MapView() {
     }
   }
 
+  function findShortestPath() {
+    const result = dijkstra(graph, startNodeId, endNodeId)
+    console.log(result.frames.length)
+    setRoute(result)
+  }
+
   return (
     <div className="map-shell">
-      <button
-        className="reset-button"
-        type="button"
-        onClick={() => {
-          setStartNodeId(null)
-          setEndNodeId(null)
-        }}
-      >
-        Reset
-      </button>
+      <div className="map-controls">
+        <button
+          className="reset-button"
+          type="button"
+          onClick={() => {
+            setStartNodeId(null)
+            setEndNodeId(null)
+            setRoute(null)
+          }}
+        >
+          Reset
+        </button>
+        <button
+          className="path-button"
+          type="button"
+          disabled={!startNodeId || !endNodeId}
+          onClick={findShortestPath}
+        >
+          Find Shortest Path
+        </button>
+        {route && Number.isFinite(route.distance) && (
+          <span className="distance-label">Distance: {(route.distance / 1000).toFixed(2)} km</span>
+        )}
+      </div>
       <MapContainer center={cityCenter} zoom={15} className="map">
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -106,6 +136,9 @@ export default function MapView() {
             />
           )
         })}
+        {routePositions?.length > 1 && (
+          <Polyline positions={routePositions} pathOptions={{ color: '#0057ff', weight: 5 }} />
+        )}
         {startNode && (
           <Marker
             draggable

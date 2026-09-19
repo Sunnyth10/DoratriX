@@ -17,17 +17,36 @@ body,
   height: 100%;
 }
 
-.reset-button {
+.map-controls {
   position: absolute;
   z-index: 1000;
   top: 12px;
   right: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.reset-button,
+.path-button {
   padding: 8px 12px;
   border: 1px solid #9ca3af;
   border-radius: 4px;
   background: white;
   color: #111827;
   cursor: pointer;
+}
+
+.path-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.distance-label {
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: white;
+  color: #111827;
+  font: 14px system-ui, sans-serif;
 }
 
 .snapped-marker-container {
