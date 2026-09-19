@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { divIcon } from 'leaflet'
 import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import { astar } from '../lib/astar'
 import { dijkstra } from '../lib/dijkstra'
 import {
   checkShortReachability,
@@ -44,9 +45,12 @@ export default function MapView() {
   const [startNodeId, setStartNodeId] = useState(null)
   const [endNodeId, setEndNodeId] = useState(null)
   const [route, setRoute] = useState(null)
+  const [comparison, setComparison] = useState(null)
+  const [activeAlgorithm, setActiveAlgorithm] = useState('dijkstra')
   const [debugMode, setDebugMode] = useState(false)
   const [debugNodeIds, setDebugNodeIds] = useState([])
-  const frames = route?.frames ?? emptyFrames
+  const activeRoute = comparison?.[activeAlgorithm]?.result ?? route
+  const frames = activeRoute?.frames ?? emptyFrames
   const { currentFrameIndex, isPlaying, play, pause, reset, setFrameIndex } =
     useSearchAnimation(frames)
 
@@ -70,7 +74,7 @@ export default function MapView() {
   const nodesById = new Map(graph?.nodes.map((node) => [node.id, node]))
   const startNode = nodesById.get(startNodeId)
   const endNode = nodesById.get(endNodeId)
-  const routePositions = route?.path
+  const routePositions = activeRoute?.path
     .map((nodeId) => nodesById.get(nodeId))
     .filter(Boolean)
     .map((node) => [node.lat, node.lng])
@@ -95,6 +99,7 @@ export default function MapView() {
     if (!node) return
 
     setRoute(null)
+    setComparison(null)
 
     if (!startNodeId) {
       setStartNodeId(node.id)
@@ -108,6 +113,7 @@ export default function MapView() {
     const nearestNode = findNearestRoadNode(graph, lat, lng)
 
     setRoute(null)
+    setComparison(null)
 
     if (nodeType === 'start') {
       setStartNodeId(nearestNode.id)
@@ -119,7 +125,28 @@ export default function MapView() {
   function findShortestPath() {
     const result = dijkstra(graph, startNodeId, endNodeId)
     console.log(result.frames.length)
+    setComparison(null)
     setRoute(result)
+  }
+
+  function compareAlgorithms() {
+    const dijkstraStart = performance.now()
+    const dijkstraResult = dijkstra(graph, startNodeId, endNodeId)
+    const dijkstraTime = performance.now() - dijkstraStart
+    const astarStart = performance.now()
+    const astarResult = astar(graph, startNodeId, endNodeId)
+    const astarTime = performance.now() - astarStart
+
+    setRoute(null)
+    setActiveAlgorithm('dijkstra')
+    setComparison({
+      dijkstra: { result: dijkstraResult, time: dijkstraTime },
+      astar: { result: astarResult, time: astarTime },
+    })
+  }
+
+  function exploredNodeCount(result) {
+    return result.frames.at(-1)?.visited.length ?? 0
   }
 
   return (
@@ -132,6 +159,7 @@ export default function MapView() {
           setStartNodeId(null)
           setEndNodeId(null)
           setRoute(null)
+          setComparison(null)
         }}
       >
           Clear Points
@@ -155,8 +183,49 @@ export default function MapView() {
         >
           Find Shortest Path
         </button>
-        {route && Number.isFinite(route.distance) && (
-          <span className="distance-label">Distance: {(route.distance / 1000).toFixed(2)} km</span>
+        <button
+          className="compare-button"
+          type="button"
+          disabled={!startNodeId || !endNodeId}
+          onClick={compareAlgorithms}
+        >
+          Compare Algorithms
+        </button>
+        {activeRoute && Number.isFinite(activeRoute.distance) && (
+          <span className="distance-label">Distance: {(activeRoute.distance / 1000).toFixed(2)} km</span>
+        )}
+        {comparison && (
+          <div className="comparison-panel">
+            <div className="algorithm-switcher">
+              <button
+                type="button"
+                aria-pressed={activeAlgorithm === 'dijkstra'}
+                onClick={() => setActiveAlgorithm('dijkstra')}
+              >
+                Dijkstra
+              </button>
+              <button
+                type="button"
+                aria-pressed={activeAlgorithm === 'astar'}
+                onClick={() => setActiveAlgorithm('astar')}
+              >
+                A*
+              </button>
+            </div>
+            <div className="algorithm-stats">
+              {Object.entries(comparison).map(([algorithm, { result, time }]) => (
+                <section key={algorithm}>
+                  <h3>{algorithm === 'astar' ? 'A*' : 'Dijkstra'}</h3>
+                  <span>Explored: {exploredNodeCount(result)}</span>
+                  <span>Time: {time.toFixed(2)} ms</span>
+                  <span>
+                    Distance:{' '}
+                    {Number.isFinite(result.distance) ? `${(result.distance / 1000).toFixed(2)} km` : 'No route'}
+                  </span>
+                </section>
+              ))}
+            </div>
+          </div>
         )}
         {frames.length > 0 && (
           <div className="animation-controls">

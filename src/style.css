@@ -28,13 +28,58 @@ body,
 
 .reset-button,
 .path-button,
-.debug-button {
+.debug-button,
+.compare-button {
   padding: 8px 12px;
   border: 1px solid #9ca3af;
   border-radius: 4px;
   background: white;
   color: #111827;
   cursor: pointer;
+}
+
+.comparison-panel {
+  padding: 8px;
+  border-radius: 4px;
+  background: white;
+  color: #111827;
+  font: 13px system-ui, sans-serif;
+}
+
+.algorithm-switcher {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.algorithm-switcher button {
+  flex: 1;
+  padding: 5px;
+  border: 1px solid #9ca3af;
+  border-radius: 3px;
+  background: white;
+  cursor: pointer;
+}
+
+.algorithm-switcher button[aria-pressed='true'] {
+  background: #dbeafe;
+  border-color: #2563eb;
+}
+
+.algorithm-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.algorithm-stats section {
+  display: grid;
+  gap: 4px;
+}
+
+.algorithm-stats h3 {
+  margin: 0;
+  font-size: 14px;
 }
 
 .path-button:disabled {
