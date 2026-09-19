@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css'
 import { fetchRoadGraph } from '../lib/graph'
 
 // Replace these with the latitude and longitude of your city.
-const cityCenter = [12.9716, 77.5946]
+const cityCenter = [17.385, 78.4867]
 
 export default function MapView() {
   const [graph, setGraph] = useState(null)
