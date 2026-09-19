@@ -14,6 +14,22 @@ export function haversineDistance(first, second) {
   return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+export function findNearestNode(graph, lat, lng) {
+  let nearestNode = null
+  let shortestDistance = Infinity
+
+  for (const node of graph.nodes) {
+    const distance = haversineDistance({ lat, lng }, node)
+
+    if (distance < shortestDistance) {
+      nearestNode = node
+      shortestDistance = distance
+    }
+  }
+
+  return nearestNode
+}
+
 function boundingBox([latitude, longitude], halfSideKilometers) {
   const latitudeOffset = halfSideKilometers / 110.574
   const longitudeOffset = halfSideKilometers / (111.32 * Math.cos((latitude * Math.PI) / 180))
