@@ -1,10 +1,22 @@
 class MinPriorityQueue {
   constructor() {
     this.items = []
+    this.indices = new Map()
   }
 
   push(value, priority) {
+    const existingIndex = this.indices.get(value)
+
+    if (existingIndex !== undefined) {
+      if (this.items[existingIndex].priority <= priority) return
+
+      this.items[existingIndex].priority = priority
+      this.bubbleUp(existingIndex)
+      return
+    }
+
     this.items.push({ value, priority })
+    this.indices.set(value, this.items.length - 1)
     this.bubbleUp(this.items.length - 1)
   }
 
@@ -13,9 +25,11 @@ class MinPriorityQueue {
 
     const smallest = this.items[0]
     const last = this.items.pop()
+    this.indices.delete(smallest.value)
 
     if (this.items.length > 0) {
       this.items[0] = last
+      this.indices.set(last.value, 0)
       this.bubbleDown(0)
     }
 
@@ -31,7 +45,7 @@ class MinPriorityQueue {
       const parentIndex = Math.floor((index - 1) / 2)
       if (this.items[parentIndex].priority <= this.items[index].priority) break
 
-      ;[this.items[parentIndex], this.items[index]] = [this.items[index], this.items[parentIndex]]
+      this.swap(parentIndex, index)
       index = parentIndex
     }
   }
@@ -56,16 +70,26 @@ class MinPriorityQueue {
       }
       if (smallestIndex === index) return
 
-      ;[this.items[index], this.items[smallestIndex]] = [
-        this.items[smallestIndex],
-        this.items[index],
-      ]
+      this.swap(index, smallestIndex)
       index = smallestIndex
     }
   }
+
+  swap(firstIndex, secondIndex) {
+    ;[this.items[firstIndex], this.items[secondIndex]] = [
+      this.items[secondIndex],
+      this.items[firstIndex],
+    ]
+    this.indices.set(this.items[firstIndex].value, firstIndex)
+    this.indices.set(this.items[secondIndex].value, secondIndex)
+  }
 }
 
-export function dijkstra(graph, startNodeId, endNodeId) {
+export function dijkstra(graph, startNodeId, endNodeId, { frameDistance = 25 } = {}) {
+  if (frameDistance <= 0) {
+    throw new Error('frameDistance must be greater than zero')
+  }
+
   const adjacency = new Map(graph.nodes.map((node) => [node.id, []]))
 
   for (const edge of graph.edges) {
@@ -78,14 +102,27 @@ export function dijkstra(graph, startNodeId, endNodeId) {
   const visited = new Set()
   const frames = []
   const queue = new MinPriorityQueue()
+  let nodesInLayer = []
+  let nextFrameDistance = frameDistance
   queue.push(startNodeId, 0)
+
+  function recordFrame(currentNode) {
+    if (nodesInLayer.length === 0) return
+
+    frames.push({
+      currentNode,
+      frontier: queue.nodeIds(),
+      visited: [...visited],
+      newlyVisited: nodesInLayer,
+    })
+    nodesInLayer = []
+  }
 
   while (true) {
     const current = queue.pop()
     if (!current) break
-    if (current.priority !== distances.get(current.value)) continue
-
     visited.add(current.value)
+    nodesInLayer.push(current.value)
 
     for (const neighbor of adjacency.get(current.value) ?? []) {
       if (visited.has(neighbor.nodeId)) continue
@@ -99,14 +136,18 @@ export function dijkstra(graph, startNodeId, endNodeId) {
       }
     }
 
-    frames.push({
-      currentNode: current.value,
-      frontier: [...new Set(queue.nodeIds().filter((nodeId) => !visited.has(nodeId)))],
-      visited: [...visited],
-    })
+    if (current.priority >= nextFrameDistance) {
+      recordFrame(current.value)
+      nextFrameDistance = (Math.floor(current.priority / frameDistance) + 1) * frameDistance
+    }
 
-    if (current.value === endNodeId) break
+    if (current.value === endNodeId) {
+      recordFrame(current.value)
+      break
+    }
   }
+
+  recordFrame([...visited].at(-1))
 
   const distance = distances.get(endNodeId)
   if (distance === undefined) return { path: [], distance: Infinity, frames }

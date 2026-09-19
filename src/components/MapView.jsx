@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react'
 import { divIcon } from 'leaflet'
-import { MapContainer, Marker, Polyline, TileLayer, useMapEvents } from 'react-leaflet'
+import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { dijkstra } from '../lib/dijkstra'
-import { fetchRoadGraph, findNearestNode } from '../lib/graph'
+import {
+  checkShortReachability,
+  fetchRoadGraph,
+  findNearestNode,
+  findNearestRoadNode,
+  logNearestGraphNode,
+} from '../lib/graph'
+import { useSearchAnimation } from '../hooks/useSearchAnimation'
 
 // Replace these with the latitude and longitude of your city.
 const cityCenter = [17.418, 78.489]
+const emptyFrames = []
 
 const markerIcon = (color) =>
   divIcon({
@@ -19,13 +27,12 @@ const markerIcon = (color) =>
 const startIcon = markerIcon('#16a34a')
 const endIcon = markerIcon('#dc2626')
 
-function MapClickHandler({ graph, onNodeClick }) {
+function MapClickHandler({ graph, onMapClick }) {
   useMapEvents({
     click(event) {
       if (!graph) return
 
-      const node = findNearestNode(graph, event.latlng.lat, event.latlng.lng)
-      if (node) onNodeClick(node.id)
+      onMapClick(event.latlng)
     },
   })
 
@@ -37,6 +44,11 @@ export default function MapView() {
   const [startNodeId, setStartNodeId] = useState(null)
   const [endNodeId, setEndNodeId] = useState(null)
   const [route, setRoute] = useState(null)
+  const [debugMode, setDebugMode] = useState(false)
+  const [debugNodeIds, setDebugNodeIds] = useState([])
+  const frames = route?.frames ?? emptyFrames
+  const { currentFrameIndex, isPlaying, play, pause, reset, setFrameIndex } =
+    useSearchAnimation(frames)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -62,20 +74,38 @@ export default function MapView() {
     .map((nodeId) => nodesById.get(nodeId))
     .filter(Boolean)
     .map((node) => [node.lat, node.lng])
+  const currentFrame = frames[currentFrameIndex]
+  const showFinalPath =
+    routePositions?.length > 1 && frames.length > 0 && currentFrameIndex === frames.length - 1
 
-  function handleNodeClick(nodeId) {
+  function handleMapClick({ lat, lng }) {
+    if (debugMode) {
+      const { node } = logNearestGraphNode(graph, lat, lng)
+
+      if (debugNodeIds.length === 1) {
+        checkShortReachability(graph, debugNodeIds[0], node.id)
+        setDebugNodeIds([debugNodeIds[0], node.id])
+      } else {
+        setDebugNodeIds([node.id])
+      }
+      return
+    }
+
+    const node = findNearestRoadNode(graph, lat, lng)
+    if (!node) return
+
     setRoute(null)
 
     if (!startNodeId) {
-      setStartNodeId(nodeId)
+      setStartNodeId(node.id)
     } else if (!endNodeId) {
-      setEndNodeId(nodeId)
+      setEndNodeId(node.id)
     }
   }
 
   function handleMarkerDrag(nodeType, event) {
     const { lat, lng } = event.target.getLatLng()
-    const nearestNode = findNearestNode(graph, lat, lng)
+    const nearestNode = findNearestRoadNode(graph, lat, lng)
 
     setRoute(null)
 
@@ -99,12 +129,23 @@ export default function MapView() {
           className="reset-button"
           type="button"
           onClick={() => {
-            setStartNodeId(null)
-            setEndNodeId(null)
-            setRoute(null)
+          setStartNodeId(null)
+          setEndNodeId(null)
+          setRoute(null)
+        }}
+      >
+          Clear Points
+        </button>
+        <button
+          className="debug-button"
+          type="button"
+          aria-pressed={debugMode}
+          onClick={() => {
+            setDebugMode((enabled) => !enabled)
+            setDebugNodeIds([])
           }}
         >
-          Reset
+          Debug Mode: {debugMode ? 'On' : 'Off'}
         </button>
         <button
           className="path-button"
@@ -117,13 +158,38 @@ export default function MapView() {
         {route && Number.isFinite(route.distance) && (
           <span className="distance-label">Distance: {(route.distance / 1000).toFixed(2)} km</span>
         )}
+        {frames.length > 0 && (
+          <div className="animation-controls">
+            <div className="animation-buttons">
+              <button type="button" onClick={play} disabled={isPlaying}>
+                Play
+              </button>
+              <button type="button" onClick={pause} disabled={!isPlaying}>
+                Pause
+              </button>
+              <button type="button" onClick={reset}>
+                Reset
+              </button>
+            </div>
+            <label>
+              Step {currentFrameIndex + 1} / {frames.length}
+              <input
+                type="range"
+                min="0"
+                max={frames.length - 1}
+                value={currentFrameIndex}
+                onChange={(event) => setFrameIndex(event.target.value)}
+              />
+            </label>
+          </div>
+        )}
       </div>
-      <MapContainer center={cityCenter} zoom={15} className="map">
+      <MapContainer center={cityCenter} zoom={15} className="map" preferCanvas>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapClickHandler graph={graph} onNodeClick={handleNodeClick} />
+        <MapClickHandler graph={graph} onMapClick={handleMapClick} />
         {graph?.edges.map((edge) => {
           const from = nodesById.get(edge.from)
           const to = nodesById.get(edge.to)
@@ -136,9 +202,46 @@ export default function MapView() {
             />
           )
         })}
-        {routePositions?.length > 1 && (
+        {currentFrame?.visited.map((nodeId) => {
+          const node = nodesById.get(nodeId)
+          return node && <CircleMarker key={`visited-${nodeId}`} center={[node.lat, node.lng]} radius={3} pathOptions={{ color: '#6b7280', fillColor: '#6b7280', fillOpacity: 0.8, weight: 1 }} />
+        })}
+        {currentFrame?.frontier.map((nodeId) => {
+          const node = nodesById.get(nodeId)
+          return node && <CircleMarker key={`frontier-${nodeId}`} center={[node.lat, node.lng]} radius={3} pathOptions={{ color: '#eab308', fillColor: '#eab308', fillOpacity: 0.9, weight: 1 }} />
+        })}
+        {currentFrame && nodesById.get(currentFrame.currentNode) && (
+          <CircleMarker
+            key="current-node"
+            center={[
+              nodesById.get(currentFrame.currentNode).lat,
+              nodesById.get(currentFrame.currentNode).lng,
+            ]}
+            radius={6}
+            pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 1, weight: 1 }}
+          />
+        )}
+        {showFinalPath && (
           <Polyline positions={routePositions} pathOptions={{ color: '#0057ff', weight: 5 }} />
         )}
+        {debugNodeIds.map((nodeId, index) => {
+          const node = nodesById.get(nodeId)
+          return (
+            node && (
+              <CircleMarker
+                key={`debug-${nodeId}`}
+                center={[node.lat, node.lng]}
+                radius={7}
+                pathOptions={{
+                  color: index === 0 ? '#7c3aed' : '#ec4899',
+                  fillColor: index === 0 ? '#7c3aed' : '#ec4899',
+                  fillOpacity: 1,
+                  weight: 2,
+                }}
+              />
+            )
+          )
+        })}
         {startNode && (
           <Marker
             draggable

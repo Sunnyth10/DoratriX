@@ -1,4 +1,12 @@
 const EARTH_RADIUS_METERS = 6_371_000
+const NON_WALKABLE_HIGHWAYS = new Set([
+  'motorway',
+  'motorway_link',
+  'trunk',
+  'trunk_link',
+  'construction',
+  'proposed',
+])
 
 export function haversineDistance(first, second) {
   const toRadians = (degrees) => (degrees * Math.PI) / 180
@@ -28,6 +36,132 @@ export function findNearestNode(graph, lat, lng) {
   }
 
   return nearestNode
+}
+
+function pointToSegmentDistance(point, from, to) {
+  const metersPerLatitudeDegree = 111_320
+  const metersPerLongitudeDegree = metersPerLatitudeDegree * Math.cos((point.lat * Math.PI) / 180)
+  const fromX = (from.lng - point.lng) * metersPerLongitudeDegree
+  const fromY = (from.lat - point.lat) * metersPerLatitudeDegree
+  const toX = (to.lng - point.lng) * metersPerLongitudeDegree
+  const toY = (to.lat - point.lat) * metersPerLatitudeDegree
+  const segmentLengthSquared = (toX - fromX) ** 2 + (toY - fromY) ** 2
+  const progress =
+    segmentLengthSquared === 0
+      ? 0
+      : Math.max(0, Math.min(1, -(fromX * (toX - fromX) + fromY * (toY - fromY)) / segmentLengthSquared))
+
+  return Math.hypot(fromX + progress * (toX - fromX), fromY + progress * (toY - fromY))
+}
+
+// Snap to the closest road segment first. This prevents a sparse node on a nearby,
+// parallel road from winning over the road the user actually clicked.
+export function findNearestRoadNode(graph, lat, lng) {
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]))
+  const point = { lat, lng }
+  let nearestEdge = null
+  let shortestDistance = Infinity
+
+  for (const edge of graph.edges) {
+    const from = nodesById.get(edge.from)
+    const to = nodesById.get(edge.to)
+    const distance = pointToSegmentDistance(point, from, to)
+
+    if (distance < shortestDistance) {
+      nearestEdge = edge
+      shortestDistance = distance
+    }
+  }
+
+  if (!nearestEdge) return null
+
+  const from = nodesById.get(nearestEdge.from)
+  const to = nodesById.get(nearestEdge.to)
+  return haversineDistance(point, from) <= haversineDistance(point, to) ? from : to
+}
+
+function isWalkableWay(way) {
+  const { highway, access, foot } = way.tags ?? {}
+
+  return (
+    highway &&
+    !NON_WALKABLE_HIGHWAYS.has(highway) &&
+    !['no', 'private'].includes(access) &&
+    !['no', 'private'].includes(foot)
+  )
+}
+
+function buildAdjacency(graph) {
+  const adjacency = new Map(graph.nodes.map((node) => [node.id, []]))
+
+  for (const edge of graph.edges) {
+    adjacency.get(edge.from)?.push({ nodeId: edge.to, edge })
+    adjacency.get(edge.to)?.push({ nodeId: edge.from, edge })
+  }
+
+  return adjacency
+}
+
+export function logNearestGraphNode(graph, lat, lng) {
+  const node = findNearestNode(graph, lat, lng)
+  const edges = graph.edges.filter((edge) => edge.from === node.id || edge.to === node.id)
+
+  console.log('Nearest graph node:', {
+    id: node.id,
+    lat: node.lat,
+    lng: node.lng,
+    degree: edges.length,
+    edges,
+  })
+
+  return { node, edges }
+}
+
+export function checkShortReachability(graph, startNodeId, endNodeId, { maxHops = 12 } = {}) {
+  const adjacency = buildAdjacency(graph)
+  const queue = [{ nodeId: startNodeId, hops: 0, path: [startNodeId] }]
+  const visited = new Set([startNodeId])
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+
+    if (current.nodeId === endNodeId) {
+      const result = { reachable: true, hops: current.hops, path: current.path }
+      console.log('Short connectivity check:', result)
+      return result
+    }
+
+    if (current.hops === maxHops) continue
+
+    for (const neighbor of adjacency.get(current.nodeId) ?? []) {
+      if (visited.has(neighbor.nodeId)) continue
+
+      visited.add(neighbor.nodeId)
+      queue.push({
+        nodeId: neighbor.nodeId,
+        hops: current.hops + 1,
+        path: [...current.path, neighbor.nodeId],
+      })
+    }
+  }
+
+  const start = graph.nodes.find((node) => node.id === startNodeId)
+  const end = graph.nodes.find((node) => node.id === endNodeId)
+  const result = {
+    reachable: false,
+    maxHops,
+    start: {
+      node: start,
+      edges: graph.edges.filter((edge) => edge.from === startNodeId || edge.to === startNodeId),
+    },
+    end: {
+      node: end,
+      edges: graph.edges.filter((edge) => edge.from === endNodeId || edge.to === endNodeId),
+    },
+  }
+
+  console.warn('Short connectivity check failed:', result)
+  return result
 }
 
 function boundingBox([latitude, longitude], halfSideKilometers) {
@@ -69,7 +203,7 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
   const seenEdges = new Set()
   const edges = []
 
-  for (const way of elements.filter((element) => element.type === 'way')) {
+  for (const way of elements.filter((element) => element.type === 'way' && isWalkableWay(element))) {
     for (let index = 0; index < way.nodes.length - 1; index += 1) {
       const from = pointsById.get(way.nodes[index])
       const to = pointsById.get(way.nodes[index + 1])
@@ -91,8 +225,25 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
     }
   }
 
-  return {
-    nodes: [...usedNodeIds].map((id) => pointsById.get(id)),
-    edges,
+  // OSM node IDs are used directly as graph IDs, so a shared way-node reference
+  // always resolves to the same graph node at an intersection.
+  const nodes = [...usedNodeIds].map((id) => pointsById.get(id))
+  const degreeByNodeId = new Map(nodes.map((node) => [node.id, 0]))
+
+  for (const edge of edges) {
+    degreeByNodeId.set(edge.from, degreeByNodeId.get(edge.from) + 1)
+    degreeByNodeId.set(edge.to, degreeByNodeId.get(edge.to) + 1)
   }
+
+  const degreeOneNodes = [...degreeByNodeId.values()].filter((degree) => degree === 1).length
+  const multiEdgeNodes = [...degreeByNodeId.values()].filter((degree) => degree > 1).length
+
+  console.log('Road graph statistics:', {
+    uniqueNodes: nodes.length,
+    edges: edges.length,
+    degreeOneNodes,
+    multiEdgeNodes,
+  })
+
+  return { nodes, edges }
 }

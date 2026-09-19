@@ -27,7 +27,8 @@ body,
 }
 
 .reset-button,
-.path-button {
+.path-button,
+.debug-button {
   padding: 8px 12px;
   border: 1px solid #9ca3af;
   border-radius: 4px;
@@ -39,6 +40,38 @@ body,
 .path-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.animation-controls {
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: white;
+  color: #111827;
+  font: 14px system-ui, sans-serif;
+}
+
+.animation-buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.animation-buttons button {
+  padding: 4px 8px;
+  border: 1px solid #9ca3af;
+  border-radius: 3px;
+  background: white;
+  color: #111827;
+  cursor: pointer;
+}
+
+.animation-controls label {
+  display: grid;
+  gap: 4px;
+}
+
+.animation-controls input {
+  width: 170px;
 }
 
 .distance-label {
