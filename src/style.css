@@ -140,3 +140,90 @@ body,
   border-radius: 50%;
   box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
 }
+
+.map-legend,
+.leaflet-control-attribution {
+  border: 1px solid rgb(203 213 225 / 80%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 4px 14px rgb(15 23 42 / 12%);
+  backdrop-filter: blur(8px);
+  color: #475569;
+  font: 600 12px/1 system-ui, sans-serif;
+}
+
+.map-legend {
+  position: absolute;
+  z-index: 1000;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  pointer-events: none;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.legend-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.legend-route {
+  width: 20px;
+  height: 4px;
+  border-radius: 999px;
+  background: #0057ff;
+  box-shadow: 0 0 0 1px rgb(0 87 255 / 15%);
+}
+
+.legend-network,
+.legend-start,
+.legend-end {
+  width: 9px;
+  height: 9px;
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 25%);
+}
+
+.legend-network { background: #6b7280; }
+.legend-start { background: #16a34a; }
+.legend-end { background: #dc2626; }
+
+.leaflet-bottom.leaflet-right {
+  right: 14px;
+  bottom: 14px;
+}
+
+.leaflet-control-attribution {
+  margin: 0 !important;
+  padding: 8px 11px !important;
+}
+
+.leaflet-control-attribution a {
+  color: #475569;
+  text-decoration: none;
+}
+
+.leaflet-control-attribution a:hover {
+  color: #1e293b;
+}
+
+@media (max-width: 640px) {
+  .map-legend {
+    gap: 9px;
+    padding: 8px 10px;
+    font-size: 10px;
+  }
+
+  .legend-item { gap: 4px; }
+  .legend-route { width: 15px; }
+}

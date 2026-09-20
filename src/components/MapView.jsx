@@ -328,6 +328,24 @@ export default function MapView() {
           />
         )}
       </MapContainer>
+      <div className="map-legend" aria-label="Map legend">
+        <span className="legend-item">
+          <i className="legend-icon legend-route" aria-hidden="true" />
+          Selected Path
+        </span>
+        <span className="legend-item">
+          <i className="legend-icon legend-network" aria-hidden="true" />
+          Network Points
+        </span>
+        <span className="legend-item">
+          <i className="legend-icon legend-start" aria-hidden="true" />
+          Start
+        </span>
+        <span className="legend-item">
+          <i className="legend-icon legend-end" aria-hidden="true" />
+          End
+        </span>
+      </div>
     </div>
   )
 }
