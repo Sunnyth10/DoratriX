@@ -8,6 +8,12 @@ const NON_WALKABLE_HIGHWAYS = new Set([
   'proposed',
 ])
 
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.nchc.org.tw/api/interpreter',
+]
+
 export function haversineDistance(first, second) {
   const toRadians = (degrees) => (degrees * Math.PI) / 180
   const latitudeDelta = toRadians(second.lat - first.lat)
@@ -184,19 +190,38 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
     (._;>;);
     out body;
   `
-  const response = await fetch(
-    `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-    { signal },
-  )
+  let elements
+  let lastError
 
-  if (!response.ok) {
-    throw new Error(`Overpass request failed: ${response.status} ${response.statusText}`)
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, { signal })
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`)
+      }
+
+      const payload = await response.json()
+      if (!Array.isArray(payload.elements)) {
+        throw new Error('Invalid road graph response')
+      }
+
+      elements = payload.elements
+      break
+    } catch (error) {
+      if (error.name === 'AbortError') throw error
+      lastError = error
+      console.warn(`Road graph request failed via ${endpoint}:`, error)
+    }
   }
 
-  const { elements } = await response.json()
+  if (!elements) {
+    throw new Error(`All road graph providers failed. ${lastError?.message ?? ''}`.trim())
+  }
+
   const pointsById = new Map(
     elements
       .filter((element) => element.type === 'node')
+      .filter((node) => Number.isFinite(node.lat) && Number.isFinite(node.lon))
       .map((node) => [node.id, { id: node.id, lat: node.lat, lng: node.lon }]),
   )
   const usedNodeIds = new Set()
@@ -228,6 +253,9 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
   // OSM node IDs are used directly as graph IDs, so a shared way-node reference
   // always resolves to the same graph node at an intersection.
   const nodes = [...usedNodeIds].map((id) => pointsById.get(id))
+  if (nodes.length === 0 || edges.length === 0) {
+    throw new Error('Road graph response contained no usable walkable nodes or edges')
+  }
   const degreeByNodeId = new Map(nodes.map((node) => [node.id, 0]))
 
   for (const edge of edges) {
