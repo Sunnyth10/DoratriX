@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export function useSearchAnimation(frames) {
+export function useSearchAnimation(frames, searchRun = 0) {
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const lastFrameIndex = Math.max(frames.length - 1, 0)
@@ -8,7 +8,7 @@ export function useSearchAnimation(frames) {
   useEffect(() => {
     setCurrentFrameIndex(0)
     setIsPlaying(false)
-  }, [frames])
+  }, [searchRun, frames])
 
   useEffect(() => {
     if (!isPlaying || frames.length === 0) return undefined

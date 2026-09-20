@@ -13,6 +13,28 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.nchc.org.tw/api/interpreter',
 ]
+const ROAD_DATA_TIMEOUT_MS = 8_000
+
+async function fetchRoadData(url, { signal }) {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, ROAD_DATA_TIMEOUT_MS)
+  const abortRequest = () => controller.abort()
+  signal?.addEventListener('abort', abortRequest, { once: true })
+
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } catch (error) {
+    if (timedOut) throw new Error('Road data request timed out')
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abortRequest)
+  }
+}
 
 export function haversineDistance(first, second) {
   const toRadians = (degrees) => (degrees * Math.PI) / 180
@@ -182,7 +204,110 @@ function boundingBox([latitude, longitude], halfSideKilometers) {
   }
 }
 
+function graphFromElements(elements) {
+  const pointsById = new Map(
+    elements
+      .filter((element) => element.type === 'node')
+      .filter((node) => Number.isFinite(node.lat) && Number.isFinite(node.lon))
+      .map((node) => [node.id, { id: node.id, lat: node.lat, lng: node.lon }]),
+  )
+  const usedNodeIds = new Set()
+  const seenEdges = new Set()
+  const edges = []
+
+  for (const way of elements.filter((element) => element.type === 'way' && isWalkableWay(element))) {
+    for (let index = 0; index < way.nodes.length - 1; index += 1) {
+      const from = pointsById.get(way.nodes[index])
+      const to = pointsById.get(way.nodes[index + 1])
+      if (!from || !to) continue
+
+      const edgeKey = [from.id, to.id].sort((a, b) => a - b).join(':')
+      if (seenEdges.has(edgeKey)) continue
+
+      seenEdges.add(edgeKey)
+      usedNodeIds.add(from.id)
+      usedNodeIds.add(to.id)
+      edges.push({ id: edgeKey, from: from.id, to: to.id, weight: haversineDistance(from, to) })
+    }
+  }
+
+  const nodes = [...usedNodeIds].map((id) => pointsById.get(id))
+  if (nodes.length === 0 || edges.length === 0) {
+    throw new Error('Road graph response contained no usable walkable nodes or edges')
+  }
+
+  const adjacency = new Map(nodes.map((node) => [node.id, []]))
+  for (const edge of edges) {
+    adjacency.get(edge.from).push(edge.to)
+    adjacency.get(edge.to).push(edge.from)
+  }
+
+  let largestComponent = []
+  const visited = new Set()
+  for (const node of nodes) {
+    if (visited.has(node.id)) continue
+
+    const component = []
+    const queue = [node.id]
+    visited.add(node.id)
+    for (let index = 0; index < queue.length; index += 1) {
+      const current = queue[index]
+      component.push(current)
+      for (const neighbor of adjacency.get(current)) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor)
+          queue.push(neighbor)
+        }
+      }
+    }
+    if (component.length > largestComponent.length) largestComponent = component
+  }
+
+  const connectedNodeIds = new Set(largestComponent)
+  return {
+    nodes: nodes.filter((node) => connectedNodeIds.has(node.id)),
+    edges: edges.filter((edge) => connectedNodeIds.has(edge.from) && connectedNodeIds.has(edge.to)),
+  }
+}
+
+function parseOsmMapXml(xmlText) {
+  const document = new DOMParser().parseFromString(xmlText, 'application/xml')
+  if (document.querySelector('parsererror')) throw new Error('Official OSM map response was invalid XML')
+
+  const nodes = [...document.querySelectorAll('node')].map((node) => ({
+    type: 'node',
+    id: Number(node.getAttribute('id')),
+    lat: Number(node.getAttribute('lat')),
+    lon: Number(node.getAttribute('lon')),
+  }))
+  const ways = [...document.querySelectorAll('way')].map((way) => ({
+    type: 'way',
+    id: Number(way.getAttribute('id')),
+    nodes: [...way.querySelectorAll(':scope > nd')].map((node) => Number(node.getAttribute('ref'))),
+    tags: Object.fromEntries(
+      [...way.querySelectorAll(':scope > tag')].map((tag) => [tag.getAttribute('k'), tag.getAttribute('v')]),
+    ),
+  }))
+
+  return [...nodes, ...ways]
+}
+
+async function fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers }) {
+  const { south, west, north, east } = boundingBox(center, halfSideKilometers)
+  const response = await fetchRoadData(`/osm-api/api/0.6/map?bbox=${west},${south},${east},${north}`, { signal })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+
+  return graphFromElements(parseOsmMapXml(await response.text()))
+}
+
 export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75 } = {}) {
+  try {
+    return await fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
+    console.warn('Official OSM map request failed; trying Overpass providers:', error)
+  }
+
   const { south, west, north, east } = boundingBox(center, halfSideKilometers)
   const query = `
     [out:json][timeout:25];
@@ -195,7 +320,7 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, { signal })
+      const response = await fetchRoadData(`${endpoint}?data=${encodeURIComponent(query)}`, { signal })
       if (!response.ok) {
         throw new Error(`${response.status} ${response.statusText}`)
       }
@@ -218,60 +343,5 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
     throw new Error(`All road graph providers failed. ${lastError?.message ?? ''}`.trim())
   }
 
-  const pointsById = new Map(
-    elements
-      .filter((element) => element.type === 'node')
-      .filter((node) => Number.isFinite(node.lat) && Number.isFinite(node.lon))
-      .map((node) => [node.id, { id: node.id, lat: node.lat, lng: node.lon }]),
-  )
-  const usedNodeIds = new Set()
-  const seenEdges = new Set()
-  const edges = []
-
-  for (const way of elements.filter((element) => element.type === 'way' && isWalkableWay(element))) {
-    for (let index = 0; index < way.nodes.length - 1; index += 1) {
-      const from = pointsById.get(way.nodes[index])
-      const to = pointsById.get(way.nodes[index + 1])
-
-      if (!from || !to) continue
-
-      const edgeKey = [from.id, to.id].sort((a, b) => a - b).join(':')
-      if (seenEdges.has(edgeKey)) continue
-
-      seenEdges.add(edgeKey)
-      usedNodeIds.add(from.id)
-      usedNodeIds.add(to.id)
-      edges.push({
-        id: edgeKey,
-        from: from.id,
-        to: to.id,
-        weight: haversineDistance(from, to),
-      })
-    }
-  }
-
-  // OSM node IDs are used directly as graph IDs, so a shared way-node reference
-  // always resolves to the same graph node at an intersection.
-  const nodes = [...usedNodeIds].map((id) => pointsById.get(id))
-  if (nodes.length === 0 || edges.length === 0) {
-    throw new Error('Road graph response contained no usable walkable nodes or edges')
-  }
-  const degreeByNodeId = new Map(nodes.map((node) => [node.id, 0]))
-
-  for (const edge of edges) {
-    degreeByNodeId.set(edge.from, degreeByNodeId.get(edge.from) + 1)
-    degreeByNodeId.set(edge.to, degreeByNodeId.get(edge.to) + 1)
-  }
-
-  const degreeOneNodes = [...degreeByNodeId.values()].filter((degree) => degree === 1).length
-  const multiEdgeNodes = [...degreeByNodeId.values()].filter((degree) => degree > 1).length
-
-  console.log('Road graph statistics:', {
-    uniqueNodes: nodes.length,
-    edges: edges.length,
-    degreeOneNodes,
-    multiEdgeNodes,
-  })
-
-  return { nodes, edges }
+  return graphFromElements(elements)
 }

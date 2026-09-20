@@ -26,6 +26,23 @@ body,
   gap: 8px;
 }
 
+.graph-status {
+  max-width: 220px;
+  margin: 0;
+  color: #334155;
+  font: 600 13px/1.35 system-ui, sans-serif;
+}
+
+.retry-button {
+  padding: 7px 10px;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  background: white;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .reset-button,
 .path-button,
 .debug-button,

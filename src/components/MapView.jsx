@@ -15,6 +15,7 @@ import { useSearchAnimation } from '../hooks/useSearchAnimation'
 
 // Replace these with the latitude and longitude of your city.
 const cityCenter = [17.418, 78.489]
+const roadNetworkHalfSideKilometers = 0.75
 const emptyFrames = []
 
 const markerIcon = (color) =>
@@ -40,6 +41,16 @@ function MapClickHandler({ graph, onMapClick }) {
   return null
 }
 
+function MapZoomHandler({ onZoomChange }) {
+  useMapEvents({
+    zoomend(event) {
+      onZoomChange(event.target.getZoom())
+    },
+  })
+
+  return null
+}
+
 export default function MapView() {
   const [graph, setGraph] = useState(null)
   const [startNodeId, setStartNodeId] = useState(null)
@@ -49,38 +60,56 @@ export default function MapView() {
   const [activeAlgorithm, setActiveAlgorithm] = useState('dijkstra')
   const [debugMode, setDebugMode] = useState(false)
   const [debugNodeIds, setDebugNodeIds] = useState([])
+  const [graphStatus, setGraphStatus] = useState('loading')
+  const [graphError, setGraphError] = useState(null)
+  const [graphLoadKey, setGraphLoadKey] = useState(0)
+  const [searchRun, setSearchRun] = useState(0)
+  const [mapZoom, setMapZoom] = useState(13)
   const activeRoute = comparison?.[activeAlgorithm]?.result ?? route
   const frames = activeRoute?.frames ?? emptyFrames
   const { currentFrameIndex, isPlaying, play, pause, reset, setFrameIndex } =
-    useSearchAnimation(frames)
+    useSearchAnimation(frames, searchRun)
 
   useEffect(() => {
     const controller = new AbortController()
 
-    fetchRoadGraph(cityCenter, { signal: controller.signal })
+    fetchRoadGraph(cityCenter, { signal: controller.signal, halfSideKilometers: roadNetworkHalfSideKilometers })
       .then((roadGraph) => {
-        console.log('Road graph:', roadGraph)
+        if (!roadGraph.nodes.length || !roadGraph.edges.length) {
+          throw new Error('No usable roads were returned for this area.')
+        }
         setGraph(roadGraph)
+        setGraphStatus('ready')
+        setGraphError(null)
       })
       .catch((error) => {
         if (error.name !== 'AbortError') {
           console.error('Could not load road graph:', error)
+          setGraphStatus('error')
+          setGraphError('Road data could not be loaded. Please retry.')
         }
       })
 
     return () => controller.abort()
-  }, [])
+  }, [graphLoadKey])
 
-  const nodesById = new Map(graph?.nodes.map((node) => [node.id, node]))
+  const nodesById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]))
   const startNode = nodesById.get(startNodeId)
   const endNode = nodesById.get(endNodeId)
-  const routePositions = activeRoute?.path
+  const routePositions = (activeRoute?.path ?? [])
     .map((nodeId) => nodesById.get(nodeId))
     .filter(Boolean)
     .map((node) => [node.lat, node.lng])
   const currentFrame = frames[currentFrameIndex]
   const showFinalPath =
-    routePositions?.length > 1 && frames.length > 0 && currentFrameIndex === frames.length - 1
+    routePositions.length > 1 && frames.length > 0 && currentFrameIndex === frames.length - 1 && !isPlaying
+  const showSearchProgress = currentFrame && !showFinalPath && mapZoom >= 15
+  const networkPathOptions = {
+    color: '#3158b4',
+    opacity: showFinalPath ? 0.42 : 0.68,
+    weight: 1.4,
+    interactive: false,
+  }
 
   function handleMapClick({ lat, lng }) {
     if (debugMode) {
@@ -111,6 +140,7 @@ export default function MapView() {
   function handleMarkerDrag(nodeType, event) {
     const { lat, lng } = event.target.getLatLng()
     const nearestNode = findNearestRoadNode(graph, lat, lng)
+    if (!nearestNode) return
 
     setRoute(null)
     setComparison(null)
@@ -124,9 +154,9 @@ export default function MapView() {
 
   function findShortestPath() {
     const result = dijkstra(graph, startNodeId, endNodeId)
-    console.log(result.frames.length)
     setComparison(null)
     setRoute(result)
+    setSearchRun((run) => run + 1)
   }
 
   function compareAlgorithms() {
@@ -143,6 +173,7 @@ export default function MapView() {
       dijkstra: { result: dijkstraResult, time: dijkstraTime },
       astar: { result: astarResult, time: astarTime },
     })
+    setSearchRun((run) => run + 1)
   }
 
   function exploredNodeCount(result) {
@@ -164,6 +195,19 @@ export default function MapView() {
       >
           Clear Points
         </button>
+        <p className="graph-status" role="status">
+          {graphStatus === 'loading' && 'Loading live road network…'}
+          {graphStatus === 'ready' && !activeRoute && 'Click a start point, then an end point.'}
+          {isPlaying && `Searching ${activeAlgorithm === 'astar' ? 'with A*' : 'with Dijkstra'}…`}
+          {showFinalPath && 'Shortest path found.'}
+          {activeRoute && !isPlaying && !showFinalPath && 'No route exists between these points.'}
+          {graphStatus === 'error' && graphError}
+        </p>
+        {graphStatus === 'error' && (
+          <button className="retry-button" type="button" onClick={() => setGraphLoadKey((key) => key + 1)}>
+            Retry road data
+          </button>
+        )}
         <button
           className="debug-button"
           type="button"
@@ -200,14 +244,20 @@ export default function MapView() {
               <button
                 type="button"
                 aria-pressed={activeAlgorithm === 'dijkstra'}
-                onClick={() => setActiveAlgorithm('dijkstra')}
+                onClick={() => {
+                  setActiveAlgorithm('dijkstra')
+                  setSearchRun((run) => run + 1)
+                }}
               >
                 Dijkstra
               </button>
               <button
                 type="button"
                 aria-pressed={activeAlgorithm === 'astar'}
-                onClick={() => setActiveAlgorithm('astar')}
+                onClick={() => {
+                  setActiveAlgorithm('astar')
+                  setSearchRun((run) => run + 1)
+                }}
               >
                 A*
               </button>
@@ -253,33 +303,35 @@ export default function MapView() {
           </div>
         )}
       </div>
-      <MapContainer center={cityCenter} zoom={15} className="map" preferCanvas>
+      <MapContainer center={cityCenter} zoom={13} className="map" preferCanvas>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapClickHandler graph={graph} onMapClick={handleMapClick} />
+        <MapZoomHandler onZoomChange={setMapZoom} />
         {graph?.edges.map((edge) => {
           const from = nodesById.get(edge.from)
           const to = nodesById.get(edge.to)
+          if (!from || !to) return null
 
           return (
             <Polyline
               key={edge.id}
               positions={[[from.lat, from.lng], [to.lat, to.lng]]}
-              pathOptions={{ color: 'blue', weight: 1 }}
+              pathOptions={networkPathOptions}
             />
           )
         })}
-        {currentFrame?.visited.map((nodeId) => {
+        {showSearchProgress && currentFrame.visited.map((nodeId) => {
           const node = nodesById.get(nodeId)
           return node && <CircleMarker key={`visited-${nodeId}`} center={[node.lat, node.lng]} radius={3} pathOptions={{ color: '#6b7280', fillColor: '#6b7280', fillOpacity: 0.8, weight: 1 }} />
         })}
-        {currentFrame?.frontier.map((nodeId) => {
+        {showSearchProgress && currentFrame.frontier.map((nodeId) => {
           const node = nodesById.get(nodeId)
           return node && <CircleMarker key={`frontier-${nodeId}`} center={[node.lat, node.lng]} radius={3} pathOptions={{ color: '#eab308', fillColor: '#eab308', fillOpacity: 0.9, weight: 1 }} />
         })}
-        {currentFrame && nodesById.get(currentFrame.currentNode) && (
+        {showSearchProgress && nodesById.get(currentFrame.currentNode) && (
           <CircleMarker
             key="current-node"
             center={[
@@ -291,7 +343,10 @@ export default function MapView() {
           />
         )}
         {showFinalPath && (
-          <Polyline positions={routePositions} pathOptions={{ color: '#0057ff', weight: 5 }} />
+          <>
+            <Polyline positions={routePositions} pathOptions={{ color: '#ffffff', opacity: 0.95, weight: 10, interactive: false }} />
+            <Polyline positions={routePositions} pathOptions={{ color: '#0057ff', opacity: 1, weight: 6, interactive: false }} />
+          </>
         )}
         {debugNodeIds.map((nodeId, index) => {
           const node = nodesById.get(nodeId)
