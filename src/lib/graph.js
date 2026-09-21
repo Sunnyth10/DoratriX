@@ -301,13 +301,14 @@ async function fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })
 }
 
 export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75 } = {}) {
-  try {
-    return await fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })
-  } catch (error) {
-    if (error.name === 'AbortError') throw error
-    console.warn('Official OSM map request failed; trying Overpass providers:', error)
+  if (import .meta.env.DEV){
+    try{
+      return await fetchOfficialOsmRoadGraph(center,{signal, halfSideKilometers})
+    }catch(error){
+      if (error.name ==='AbortError')throw error
+      console.warn('Official OSM map request failed; trying overpass provider:', error)
+    }
   }
-
   const { south, west, north, east } = boundingBox(center, halfSideKilometers)
   const query = `
     [out:json][timeout:25];

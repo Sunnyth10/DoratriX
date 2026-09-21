@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { divIcon } from 'leaflet'
-import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMapEvents } from 'react-leaflet'
+import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { astar } from '../lib/astar'
 import { dijkstra } from '../lib/dijkstra'
@@ -17,6 +17,12 @@ import { useSearchAnimation } from '../hooks/useSearchAnimation'
 const cityCenter = [17.418, 78.489]
 const roadNetworkHalfSideKilometers = 0.75
 const emptyFrames = []
+const networkPathOptions = {
+  color: '#3158b4',
+  opacity: 0.68,
+  weight: 1.4,
+  interactive: false,
+}
 
 const markerIcon = (color) =>
   divIcon({
@@ -51,6 +57,18 @@ function MapZoomHandler({ onZoomChange }) {
   return null
 }
 
+function MapPlaybackZoomHandler({ playRequest }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (playRequest === 0 || map.getZoom() >= 13) return
+
+    map.setZoom(15)
+  }, [map, playRequest])
+
+  return null
+}
+
 export default function MapView() {
   const [graph, setGraph] = useState(null)
   const [startNodeId, setStartNodeId] = useState(null)
@@ -64,6 +82,7 @@ export default function MapView() {
   const [graphError, setGraphError] = useState(null)
   const [graphLoadKey, setGraphLoadKey] = useState(0)
   const [searchRun, setSearchRun] = useState(0)
+  const [playRequest, setPlayRequest] = useState(0)
   const [mapZoom, setMapZoom] = useState(13)
   const activeRoute = comparison?.[activeAlgorithm]?.result ?? route
   const frames = activeRoute?.frames ?? emptyFrames
@@ -103,12 +122,13 @@ export default function MapView() {
   const currentFrame = frames[currentFrameIndex]
   const showFinalPath =
     routePositions.length > 1 && frames.length > 0 && currentFrameIndex === frames.length - 1 && !isPlaying
-  const showSearchProgress = currentFrame && !showFinalPath && mapZoom >= 15
-  const networkPathOptions = {
-    color: '#3158b4',
-    opacity: showFinalPath ? 0.42 : 0.68,
-    weight: 1.4,
-    interactive: false,
+  const showSearchProgress = currentFrame && !showFinalPath
+  const searchMarkerRadius = Math.min(5, Math.max(2, 2 + (mapZoom - 13) * 0.75))
+  const currentMarkerRadius = Math.min(7, searchMarkerRadius + 2)
+
+  function handlePlay() {
+    setPlayRequest((request) => request + 1)
+    play()
   }
 
   function handleMapClick({ lat, lng }) {
@@ -280,7 +300,7 @@ export default function MapView() {
         {frames.length > 0 && (
           <div className="animation-controls">
             <div className="animation-buttons">
-              <button type="button" onClick={play} disabled={isPlaying}>
+              <button type="button" onClick={handlePlay} disabled={isPlaying}>
                 Play
               </button>
               <button type="button" onClick={pause} disabled={!isPlaying}>
@@ -310,6 +330,7 @@ export default function MapView() {
         />
         <MapClickHandler graph={graph} onMapClick={handleMapClick} />
         <MapZoomHandler onZoomChange={setMapZoom} />
+        <MapPlaybackZoomHandler playRequest={playRequest} />
         {graph?.edges.map((edge) => {
           const from = nodesById.get(edge.from)
           const to = nodesById.get(edge.to)
@@ -325,11 +346,11 @@ export default function MapView() {
         })}
         {showSearchProgress && currentFrame.visited.map((nodeId) => {
           const node = nodesById.get(nodeId)
-          return node && <CircleMarker key={`visited-${nodeId}`} center={[node.lat, node.lng]} radius={3} pathOptions={{ color: '#6b7280', fillColor: '#6b7280', fillOpacity: 0.8, weight: 1 }} />
+          return node && <CircleMarker key={`visited-${nodeId}`} center={[node.lat, node.lng]} radius={searchMarkerRadius} pathOptions={{ color: '#6b7280', fillColor: '#6b7280', fillOpacity: 0.8, weight: 1 }} />
         })}
         {showSearchProgress && currentFrame.frontier.map((nodeId) => {
           const node = nodesById.get(nodeId)
-          return node && <CircleMarker key={`frontier-${nodeId}`} center={[node.lat, node.lng]} radius={3} pathOptions={{ color: '#eab308', fillColor: '#eab308', fillOpacity: 0.9, weight: 1 }} />
+          return node && <CircleMarker key={`frontier-${nodeId}`} center={[node.lat, node.lng]} radius={searchMarkerRadius} pathOptions={{ color: '#eab308', fillColor: '#eab308', fillOpacity: 0.9, weight: 1 }} />
         })}
         {showSearchProgress && nodesById.get(currentFrame.currentNode) && (
           <CircleMarker
@@ -338,7 +359,7 @@ export default function MapView() {
               nodesById.get(currentFrame.currentNode).lat,
               nodesById.get(currentFrame.currentNode).lng,
             ]}
-            radius={6}
+            radius={currentMarkerRadius}
             pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 1, weight: 1 }}
           />
         )}
