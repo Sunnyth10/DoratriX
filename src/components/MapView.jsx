@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { divIcon } from 'leaflet'
 import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -9,6 +9,7 @@ import {
   fetchRoadGraph,
   findNearestNode,
   findNearestRoadNode,
+  isLocationInGraphBounds,
   logNearestGraphNode,
 } from '../lib/graph'
 import { useSearchAnimation } from '../hooks/useSearchAnimation'
@@ -69,6 +70,18 @@ function MapPlaybackZoomHandler({ playRequest }) {
   return null
 }
 
+function MapFocus({ request }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!request) return
+
+    map.flyTo(request.center, 15)
+  }, [map, request])
+
+  return null
+}
+
 export default function MapView() {
   const [graph, setGraph] = useState(null)
   const [startNodeId, setStartNodeId] = useState(null)
@@ -80,7 +93,12 @@ export default function MapView() {
   const [debugNodeIds, setDebugNodeIds] = useState([])
   const [graphStatus, setGraphStatus] = useState('loading')
   const [graphError, setGraphError] = useState(null)
-  const [graphLoadKey, setGraphLoadKey] = useState(0)
+  const [graphRequest, setGraphRequest] = useState({ center: cityCenter, label: 'your area', key: 0 })
+  const [isRoadLoading, setIsRoadLoading] = useState(true)
+  const [locationQuery, setLocationQuery] = useState('')
+  const [isLocationSearching, setIsLocationSearching] = useState(false)
+  const [locationError, setLocationError] = useState(null)
+  const [mapFocusRequest, setMapFocusRequest] = useState(null)
   const [searchRun, setSearchRun] = useState(0)
   const [playRequest, setPlayRequest] = useState(0)
   const [mapZoom, setMapZoom] = useState(13)
@@ -88,31 +106,68 @@ export default function MapView() {
   const frames = activeRoute?.frames ?? emptyFrames
   const { currentFrameIndex, isPlaying, play, pause, reset, setFrameIndex } =
     useSearchAnimation(frames, searchRun)
+  const graphRef = useRef(graph)
+
+  useEffect(() => {
+    graphRef.current = graph
+  }, [graph])
 
   useEffect(() => {
     const controller = new AbortController()
 
-    fetchRoadGraph(cityCenter, { signal: controller.signal, halfSideKilometers: roadNetworkHalfSideKilometers })
-      .then((roadGraph) => {
-        if (!roadGraph.nodes.length || !roadGraph.edges.length) {
+    setIsRoadLoading(true)
+
+    queueMicrotask(async () => {
+      if (controller.signal.aborted) return
+
+      try {
+        const newGraph = await fetchRoadGraph(graphRequest.center, {
+          signal: controller.signal,
+          halfSideKilometers: roadNetworkHalfSideKilometers,
+        })
+        if (!newGraph.nodes.length || !newGraph.edges.length) {
           throw new Error('No usable roads were returned for this area.')
         }
-        setGraph(roadGraph)
+
+        setGraph(newGraph)
+        setStartNodeId(null)
+        setEndNodeId(null)
+        setRoute(null)
+        setComparison(null)
+        setDebugNodeIds([])
+        setSearchRun((run) => run + 1)
+        setMapFocusRequest({ center: graphRequest.center, key: graphRequest.key })
         setGraphStatus('ready')
         setGraphError(null)
-      })
-      .catch((error) => {
+      } catch (error) {
         if (error.name !== 'AbortError') {
           console.error('Could not load road graph:', error)
-          setGraphStatus('error')
-          setGraphError('Road data could not be loaded. Please retry.')
+          const hasPreviousGraph = Boolean(graphRef.current)
+          setGraphStatus(hasPreviousGraph ? 'ready' : 'error')
+          setGraphError(
+            hasPreviousGraph
+              ? `Couldn't load roads near ${graphRequest.label}. Your previous map is still active.`
+              : 'Road data could not be loaded.',
+          )
         }
-      })
+      } finally {
+        if (!controller.signal.aborted) setIsRoadLoading(false)
+      }
+    })
 
     return () => controller.abort()
-  }, [graphLoadKey])
+  }, [graphRequest])
 
-  const nodesById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]))
+  const nodesById = useMemo(() => new Map((graph?.nodes ?? []).map((node) => [node.id, node])), [graph])
+  const networkSegments = useMemo(
+    () =>
+      (graph?.edges ?? []).flatMap((edge) => {
+        const from = nodesById.get(edge.from)
+        const to = nodesById.get(edge.to)
+        return from && to ? [[[from.lat, from.lng], [to.lat, to.lng]]] : []
+      }),
+    [graph, nodesById],
+  )
   const startNode = nodesById.get(startNodeId)
   const endNode = nodesById.get(endNodeId)
   const routePositions = (activeRoute?.path ?? [])
@@ -131,7 +186,60 @@ export default function MapView() {
     play()
   }
 
+  function requestRoadGraph(center, label) {
+    if (isRoadLoading) return
+
+    setIsRoadLoading(true)
+    setGraphError(null)
+    setGraphRequest((request) => ({ center, label, key: request.key + 1 }))
+  }
+
+  async function handleLocationSearch(event) {
+    event.preventDefault()
+    const query = locationQuery.trim()
+    if (!query || isRoadLoading || isLocationSearching) return
+
+    setIsLocationSearching(true)
+    setLocationError(null)
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,
+      )
+      if (!response.ok) throw new Error('Location search failed')
+
+      const results = await response.json()
+      const result = results[0]
+      if (!result) {
+        setLocationError('No matching location was found.')
+        return
+      }
+
+      const center = [Number(result.lat), Number(result.lon)]
+      if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) {
+        setLocationError('No matching location was found.')
+        return
+      }
+
+      if (isLocationInGraphBounds(graph, { lat: center[0], lng: center[1] })) {
+        setMapFocusRequest((request) => ({ center, key: (request?.key ?? 0) + 1 }))
+      } else {
+        requestRoadGraph(center, result.display_name || query)
+      }
+    } catch (error) {
+      setLocationError('Location search failed. Please try again.')
+    } finally {
+      setIsLocationSearching(false)
+    }
+  }
+
   function handleMapClick({ lat, lng }) {
+    if (isRoadLoading || isLocationSearching) return
+
+    if (!isLocationInGraphBounds(graph, { lat, lng })) {
+      requestRoadGraph([lat, lng], 'the selected location')
+      return
+    }
+
     if (debugMode) {
       const { node } = logNearestGraphNode(graph, lat, lng)
 
@@ -158,6 +266,8 @@ export default function MapView() {
   }
 
   function handleMarkerDrag(nodeType, event) {
+    if (isRoadLoading || isLocationSearching) return
+
     const { lat, lng } = event.target.getLatLng()
     const nearestNode = findNearestRoadNode(graph, lat, lng)
     if (!nearestNode) return
@@ -206,6 +316,7 @@ export default function MapView() {
         <button
           className="reset-button"
           type="button"
+          disabled={isRoadLoading}
           onClick={() => {
           setStartNodeId(null)
           setEndNodeId(null)
@@ -216,22 +327,48 @@ export default function MapView() {
           Clear Points
         </button>
         <p className="graph-status" role="status">
-          {graphStatus === 'loading' && 'Loading live road network…'}
-          {graphStatus === 'ready' && !activeRoute && 'Click a start point, then an end point.'}
-          {isPlaying && `Searching ${activeAlgorithm === 'astar' ? 'with A*' : 'with Dijkstra'}…`}
-          {showFinalPath && 'Shortest path found.'}
-          {activeRoute && !isPlaying && !showFinalPath && 'No route exists between these points.'}
-          {graphStatus === 'error' && graphError}
+          {graphError ||
+            (graphStatus === 'ready' && !activeRoute && 'Click a start point, then an end point.') ||
+            (isPlaying && `Searching ${activeAlgorithm === 'astar' ? 'with A*' : 'with Dijkstra'}…`) ||
+            (showFinalPath && 'Shortest path found.') ||
+            (activeRoute && 'No route exists between these points.')}
         </p>
-        {graphStatus === 'error' && (
-          <button className="retry-button" type="button" onClick={() => setGraphLoadKey((key) => key + 1)}>
+        {graphError && (
+          <button className="dismiss-error-button" type="button" onClick={() => setGraphError(null)}>
+            Dismiss
+          </button>
+        )}
+        {graphStatus === 'error' && !isRoadLoading && (
+          <button
+            className="retry-button"
+            type="button"
+            onClick={() => requestRoadGraph(graphRequest.center, graphRequest.label)}
+          >
             Retry road data
           </button>
         )}
+        <form className="location-search" onSubmit={handleLocationSearch}>
+          <label htmlFor="location-search">Find a location</label>
+          <div>
+            <input
+              id="location-search"
+              type="search"
+              value={locationQuery}
+              onChange={(event) => setLocationQuery(event.target.value)}
+              placeholder="Search a place"
+              disabled={isRoadLoading}
+            />
+            <button type="submit" disabled={isRoadLoading || isLocationSearching || !locationQuery.trim()}>
+              {isLocationSearching ? 'Searching…' : 'Search'}
+            </button>
+          </div>
+          {locationError && <span role="alert">{locationError}</span>}
+        </form>
         <button
           className="debug-button"
           type="button"
           aria-pressed={debugMode}
+          disabled={isRoadLoading}
           onClick={() => {
             setDebugMode((enabled) => !enabled)
             setDebugNodeIds([])
@@ -242,7 +379,7 @@ export default function MapView() {
         <button
           className="path-button"
           type="button"
-          disabled={!startNodeId || !endNodeId}
+          disabled={isRoadLoading || !startNodeId || !endNodeId}
           onClick={findShortestPath}
         >
           Find Shortest Path
@@ -250,7 +387,7 @@ export default function MapView() {
         <button
           className="compare-button"
           type="button"
-          disabled={!startNodeId || !endNodeId}
+          disabled={isRoadLoading || !startNodeId || !endNodeId}
           onClick={compareAlgorithms}
         >
           Compare Algorithms
@@ -331,19 +468,8 @@ export default function MapView() {
         <MapClickHandler graph={graph} onMapClick={handleMapClick} />
         <MapZoomHandler onZoomChange={setMapZoom} />
         <MapPlaybackZoomHandler playRequest={playRequest} />
-        {graph?.edges.map((edge) => {
-          const from = nodesById.get(edge.from)
-          const to = nodesById.get(edge.to)
-          if (!from || !to) return null
-
-          return (
-            <Polyline
-              key={edge.id}
-              positions={[[from.lat, from.lng], [to.lat, to.lng]]}
-              pathOptions={networkPathOptions}
-            />
-          )
-        })}
+        <MapFocus request={mapFocusRequest} />
+        {networkSegments.length > 0 && <Polyline positions={networkSegments} pathOptions={networkPathOptions} />}
         {showSearchProgress && currentFrame.visited.map((nodeId) => {
           const node = nodesById.get(nodeId)
           return node && <CircleMarker key={`visited-${nodeId}`} center={[node.lat, node.lng]} radius={searchMarkerRadius} pathOptions={{ color: '#6b7280', fillColor: '#6b7280', fillOpacity: 0.8, weight: 1 }} />
@@ -404,6 +530,12 @@ export default function MapView() {
           />
         )}
       </MapContainer>
+      {isRoadLoading && (
+        <div className="road-loading-overlay" role="status" aria-live="polite">
+          <span className="road-loading-spinner" aria-hidden="true" />
+          Loading roads near {graphRequest.label}…
+        </div>
+      )}
       <div className="map-legend" aria-label="Map legend">
         <span className="legend-item">
           <i className="legend-icon legend-route" aria-hidden="true" />

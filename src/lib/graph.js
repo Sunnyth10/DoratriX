@@ -13,7 +13,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.nchc.org.tw/api/interpreter',
 ]
-const ROAD_DATA_TIMEOUT_MS = 8_000
+const ROAD_DATA_TIMEOUT_MS = 30_000
 
 async function fetchRoadData(url, { signal }) {
   const controller = new AbortController()
@@ -204,6 +204,13 @@ function boundingBox([latitude, longitude], halfSideKilometers) {
   }
 }
 
+export function isLocationInGraphBounds(graph, { lat, lng }) {
+  const bounds = graph?.bounds
+  return Boolean(
+    bounds && lat >= bounds.south && lat <= bounds.north && lng >= bounds.west && lng <= bounds.east,
+  )
+}
+
 function graphFromElements(elements) {
   const pointsById = new Map(
     elements
@@ -301,15 +308,16 @@ async function fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })
 }
 
 export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75 } = {}) {
+  const bounds = boundingBox(center, halfSideKilometers)
   if (import .meta.env.DEV){
     try{
-      return await fetchOfficialOsmRoadGraph(center,{signal, halfSideKilometers})
+      return { ...(await fetchOfficialOsmRoadGraph(center,{signal, halfSideKilometers})), bounds }
     }catch(error){
       if (error.name ==='AbortError')throw error
       console.warn('Official OSM map request failed; trying overpass provider:', error)
     }
   }
-  const { south, west, north, east } = boundingBox(center, halfSideKilometers)
+  const { south, west, north, east } = bounds
   const query = `
     [out:json][timeout:25];
     way["highway"](${south},${west},${north},${east});
@@ -344,5 +352,5 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
     throw new Error(`All road graph providers failed. ${lastError?.message ?? ''}`.trim())
   }
 
-  return graphFromElements(elements)
+  return { ...graphFromElements(elements), bounds }
 }
