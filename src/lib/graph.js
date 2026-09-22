@@ -1,4 +1,5 @@
 const EARTH_RADIUS_METERS = 6_371_000
+export const MAX_SNAP_METERS = 75
 const NON_WALKABLE_HIGHWAYS = new Set([
   'motorway',
   'motorway_link',
@@ -105,7 +106,10 @@ export function findNearestRoadNode(graph, lat, lng) {
 
   const from = nodesById.get(nearestEdge.from)
   const to = nodesById.get(nearestEdge.to)
-  return haversineDistance(point, from) <= haversineDistance(point, to) ? from : to
+  return {
+    node: haversineDistance(point, from) <= haversineDistance(point, to) ? from : to,
+    distance: shortestDistance,
+  }
 }
 
 function isWalkableWay(way) {

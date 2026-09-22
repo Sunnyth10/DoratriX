@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { divIcon } from 'leaflet'
-import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, Rectangle, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { astar } from '../lib/astar'
 import { dijkstra } from '../lib/dijkstra'
@@ -11,6 +11,7 @@ import {
   findNearestRoadNode,
   isLocationInGraphBounds,
   logNearestGraphNode,
+  MAX_SNAP_METERS,
 } from '../lib/graph'
 import { useSearchAnimation } from '../hooks/useSearchAnimation'
 
@@ -102,6 +103,8 @@ export default function MapView() {
   const [searchRun, setSearchRun] = useState(0)
   const [playRequest, setPlayRequest] = useState(0)
   const [mapZoom, setMapZoom] = useState(13)
+  const [outsideClick, setOutsideClick] = useState(null)
+  const [snapMessage, setSnapMessage] = useState(null)
   const activeRoute = comparison?.[activeAlgorithm]?.result ?? route
   const frames = activeRoute?.frames ?? emptyFrames
   const { currentFrameIndex, isPlaying, play, pause, reset, setFrameIndex } =
@@ -111,6 +114,15 @@ export default function MapView() {
   useEffect(() => {
     graphRef.current = graph
   }, [graph])
+
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === 'Escape') setOutsideClick(null)
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -151,7 +163,10 @@ export default function MapView() {
           )
         }
       } finally {
-        if (!controller.signal.aborted) setIsRoadLoading(false)
+        if (!controller.signal.aborted) {
+          setOutsideClick(null)
+          setIsRoadLoading(false)
+        }
       }
     })
 
@@ -189,6 +204,7 @@ export default function MapView() {
   function requestRoadGraph(center, label) {
     if (isRoadLoading) return
 
+    setOutsideClick(null)
     setIsRoadLoading(true)
     setGraphError(null)
     setGraphRequest((request) => ({ center, label, key: request.key + 1 }))
@@ -235,8 +251,10 @@ export default function MapView() {
   function handleMapClick({ lat, lng }) {
     if (isRoadLoading || isLocationSearching) return
 
+    setOutsideClick(null)
+
     if (!isLocationInGraphBounds(graph, { lat, lng })) {
-      requestRoadGraph([lat, lng], 'the selected location')
+      setOutsideClick({ lat, lng })
       return
     }
 
@@ -252,9 +270,15 @@ export default function MapView() {
       return
     }
 
-    const node = findNearestRoadNode(graph, lat, lng)
-    if (!node) return
+    const nearestRoad = findNearestRoadNode(graph, lat, lng)
+    if (!nearestRoad) return
+    if (nearestRoad.distance > MAX_SNAP_METERS) {
+      setSnapMessage('Too far from a road. Click closer to a highlighted street.')
+      return
+    }
+    const { node } = nearestRoad
 
+    setSnapMessage(null)
     setRoute(null)
     setComparison(null)
 
@@ -269,8 +293,9 @@ export default function MapView() {
     if (isRoadLoading || isLocationSearching) return
 
     const { lat, lng } = event.target.getLatLng()
-    const nearestNode = findNearestRoadNode(graph, lat, lng)
-    if (!nearestNode) return
+    const nearestRoad = findNearestRoadNode(graph, lat, lng)
+    if (!nearestRoad || nearestRoad.distance > MAX_SNAP_METERS) return
+    const { node: nearestNode } = nearestRoad
 
     setRoute(null)
     setComparison(null)
@@ -328,6 +353,7 @@ export default function MapView() {
         </button>
         <p className="graph-status" role="status">
           {graphError ||
+            snapMessage ||
             (graphStatus === 'ready' && !activeRoute && 'Click a start point, then an end point.') ||
             (isPlaying && `Searching ${activeAlgorithm === 'astar' ? 'with A*' : 'with Dijkstra'}…`) ||
             (showFinalPath && 'Shortest path found.') ||
@@ -469,6 +495,13 @@ export default function MapView() {
         <MapZoomHandler onZoomChange={setMapZoom} />
         <MapPlaybackZoomHandler playRequest={playRequest} />
         <MapFocus request={mapFocusRequest} />
+        {graph?.bounds && (
+          <Rectangle
+            bounds={[[graph.bounds.south, graph.bounds.west], [graph.bounds.north, graph.bounds.east]]}
+            pathOptions={{ color: '#3158b4', dashArray: '6 6', opacity: 0.35, fill: false, interactive: false, weight: 1 }}
+            interactive={false}
+          />
+        )}
         {networkSegments.length > 0 && <Polyline positions={networkSegments} pathOptions={networkPathOptions} />}
         {showSearchProgress && currentFrame.visited.map((nodeId) => {
           const node = nodesById.get(nodeId)
@@ -528,6 +561,18 @@ export default function MapView() {
             icon={endIcon}
             position={[endNode.lat, endNode.lng]}
           />
+        )}
+        {outsideClick && (
+          <Popup
+            position={[outsideClick.lat, outsideClick.lng]}
+            eventHandlers={{ remove: () => setOutsideClick(null) }}
+          >
+            <p>No road data here.</p>
+            {(startNodeId || endNodeId) && <p>This will clear your current points.</p>}
+            <button type="button" onClick={() => requestRoadGraph([outsideClick.lat, outsideClick.lng], 'the selected location')}>
+              Load roads near here
+            </button>
+          </Popup>
         )}
       </MapContainer>
       {isRoadLoading && (
