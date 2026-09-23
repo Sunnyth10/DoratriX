@@ -337,6 +337,13 @@ export default function MapView() {
 
   return (
     <div className="map-shell">
+      <header className="app-header">
+        <div className="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none"><rect x="7" y="7" width="26" height="26" rx="4" transform="rotate(45 20 20)" fill="#2952e3"/><path d="M12.5 13.5h7v8h8" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/><path d="m24 17 3.5 4.5L24 26" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
+        <span className="brand-name">DoratriX</span>
+        <span className="brand-tagline">Find Shortest Paths. Visualize the Journey.</span>
+      </header>
       <div className="map-controls">
         <button
           className="reset-button"
@@ -349,7 +356,11 @@ export default function MapView() {
           setComparison(null)
         }}
       >
-          Clear Points
+          <span className="control-row-leading">
+            <svg className="control-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.05 6-11a6 6 0 1 0-12 0c0 5.95 6 11 6 11Z" stroke="currentColor" strokeWidth="1.8"/><circle cx="12" cy="10" r="2" fill="currentColor"/></svg>
+            <span>Clear Points</span>
+          </span>
+          <svg className="row-action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"/></svg>
         </button>
         <p className="graph-status" role="status">
           {graphError ||
@@ -400,23 +411,35 @@ export default function MapView() {
             setDebugNodeIds([])
           }}
         >
-          Debug Mode: {debugMode ? 'On' : 'Off'}
+          <span className="control-row-leading">
+            <svg className="control-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 9h6M10 5.5 8.5 3M14 5.5 15.5 3M7.5 14.5h9M8 20l1.25-3.25h5.5L16 20M7 9.5h10v5a5 5 0 0 1-10 0v-5Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/><circle cx="10" cy="12" r=".8" fill="currentColor"/><circle cx="14" cy="12" r=".8" fill="currentColor"/></svg>
+            <span>Debug Mode: {debugMode ? 'On' : 'Off'}</span>
+          </span>
+          <span className={`toggle-switch ${debugMode ? 'is-on' : ''}`} aria-hidden="true"><span /></span>
         </button>
         <button
           className="path-button"
           type="button"
           disabled={isRoadLoading || !startNodeId || !endNodeId}
           onClick={findShortestPath}
-        >
-          Find Shortest Path
+      >
+          <span className="control-row-leading">
+            <svg className="control-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="17" r="2" stroke="currentColor" strokeWidth="1.7"/><circle cx="18" cy="7" r="2" stroke="currentColor" strokeWidth="1.7"/><path d="M7.7 15.9C10.2 12.5 10.7 8 16.1 7.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeDasharray="2.5 2.5"/></svg>
+            <span>Find Shortest Path</span>
+          </span>
+          <span className="row-chevron" aria-hidden="true">›</span>
         </button>
         <button
           className="compare-button"
           type="button"
           disabled={isRoadLoading || !startNodeId || !endNodeId}
           onClick={compareAlgorithms}
-        >
-          Compare Algorithms
+      >
+          <span className="control-row-leading">
+            <svg className="control-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4v16M5 7h14M7 7l-3 6h6L7 7Zm10 0-3 6h6l-3-6Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/><path d="M8 20h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>
+            <span>Compare Algorithms</span>
+          </span>
+          <span className="row-chevron" aria-hidden="true">›</span>
         </button>
         {activeRoute && Number.isFinite(activeRoute.distance) && (
           <span className="distance-label">Distance: {(activeRoute.distance / 1000).toFixed(2)} km</span>
