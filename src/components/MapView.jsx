@@ -110,6 +110,7 @@ export default function MapView() {
   const { currentFrameIndex, isPlaying, play, pause, reset, setFrameIndex } =
     useSearchAnimation(frames, searchRun)
   const graphRef = useRef(graph)
+  const graphStateRef = useRef(null)
 
   useEffect(() => {
     graphRef.current = graph
@@ -148,6 +149,7 @@ export default function MapView() {
         setComparison(null)
         setDebugNodeIds([])
         setSearchRun((run) => run + 1)
+        graphStateRef.current = null
         setMapFocusRequest({ center: graphRequest.center, key: graphRequest.key })
         setGraphStatus('ready')
         setGraphError(null)
@@ -155,6 +157,15 @@ export default function MapView() {
         if (error.name !== 'AbortError') {
           console.error('Could not load road graph:', error)
           const hasPreviousGraph = Boolean(graphRef.current)
+          if (hasPreviousGraph && graphStateRef.current) {
+            const previousState = graphStateRef.current
+            setStartNodeId(previousState.startNodeId)
+            setEndNodeId(previousState.endNodeId)
+            setRoute(previousState.route)
+            setComparison(previousState.comparison)
+            setDebugNodeIds(previousState.debugNodeIds)
+            graphStateRef.current = null
+          }
           setGraphStatus(hasPreviousGraph ? 'ready' : 'error')
           setGraphError(
             hasPreviousGraph
@@ -207,6 +218,20 @@ export default function MapView() {
     setOutsideClick(null)
     setIsRoadLoading(true)
     setGraphError(null)
+    graphStateRef.current = {
+      startNodeId,
+      endNodeId,
+      route,
+      comparison,
+      debugNodeIds,
+    }
+    setSnapMessage(null)
+    setStartNodeId(null)
+    setEndNodeId(null)
+    setRoute(null)
+    setComparison(null)
+    setDebugNodeIds([])
+    setSearchRun((run) => run + 1)
     setGraphRequest((request) => ({ center, label, key: request.key + 1 }))
   }
 
@@ -278,13 +303,15 @@ export default function MapView() {
     }
     const { node } = nearestRoad
 
-    setSnapMessage(null)
-    setRoute(null)
-    setComparison(null)
-
     if (!startNodeId) {
+      setSnapMessage(null)
+      setRoute(null)
+      setComparison(null)
       setStartNodeId(node.id)
     } else if (!endNodeId) {
+      setSnapMessage(null)
+      setRoute(null)
+      setComparison(null)
       setEndNodeId(node.id)
     }
   }
