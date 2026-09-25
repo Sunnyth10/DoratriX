@@ -170,8 +170,8 @@ export default function MapView() {
           setGraphStatus(hasPreviousGraph ? 'ready' : 'error')
           setGraphError(
             hasPreviousGraph
-              ? `Couldn't load roads near ${graphRequest.label}. Your previous map is still active.`
-              : 'Road data could not be loaded.',
+              ? `Couldn't load roads near ${graphRequest.label}. Your previous map is still active. ${error.message}`
+              : `Road data could not be loaded. ${error.message}`,
           )
         }
       } finally {

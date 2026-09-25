@@ -10,14 +10,14 @@ const NON_WALKABLE_HIGHWAYS = new Set([
   'proposed',
 ])
 
-const OVERPASS_ENDPOINTS = [
+const DEVELOPMENT_OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.nchc.org.tw/api/interpreter',
 ]
 const ROAD_DATA_TIMEOUT_MS = 30_000
 
-async function fetchRoadData(url, { signal }) {
+async function fetchRoadData(url, { signal, ...options }) {
   const controller = new AbortController()
   let timedOut = false
   const timeoutId = window.setTimeout(() => {
@@ -28,9 +28,13 @@ async function fetchRoadData(url, { signal }) {
   signal?.addEventListener('abort', abortRequest, { once: true })
 
   try {
-    return await fetch(url, { signal: controller.signal })
+    return await fetch(url, { ...options, signal: controller.signal })
   } catch (error) {
-    if (timedOut) throw new Error('Road data request timed out')
+    if (timedOut) {
+      const timeoutError = new Error(`Road data request timed out after ${ROAD_DATA_TIMEOUT_MS / 1000}s`)
+      timeoutError.name = 'TimeoutError'
+      throw timeoutError
+    }
     throw error
   } finally {
     window.clearTimeout(timeoutId)
@@ -329,33 +333,43 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
     (._;>;);
     out body;
   `
-  let elements
-  let lastError
-
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const response = await fetchRoadData(`${endpoint}?data=${encodeURIComponent(query)}`, { signal })
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}`)
+  let response
+  if (import.meta.env.DEV) {
+    let lastError
+    for (const endpoint of DEVELOPMENT_OVERPASS_ENDPOINTS) {
+      try {
+        response = await fetchRoadData(`${endpoint}?data=${encodeURIComponent(query)}`, { signal })
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+        break
+      } catch (error) {
+        if (error.name === 'AbortError') throw error
+        lastError = error
+        console.warn(`Development Overpass request failed via ${endpoint} (${error.name}): ${error.message}`, error)
       }
-
-      const payload = await response.json()
-      if (!Array.isArray(payload.elements)) {
-        throw new Error('Invalid road graph response')
-      }
-
-      elements = payload.elements
-      break
-    } catch (error) {
-      if (error.name === 'AbortError') throw error
-      lastError = error
-      console.warn(`Road graph request failed via ${endpoint}:`, error)
     }
+    if (!response?.ok) {
+      throw new Error(`All development Overpass providers failed. ${lastError?.message ?? ''}`.trim())
+    }
+  } else {
+    response = await fetchRoadData('/api/overpass', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+      signal,
+    })
+  }
+  if (!response.ok) {
+    let responseDetail = ''
+    try {
+      responseDetail = (await response.text()).trim().replace(/\s+/g, ' ').slice(0, 400)
+    } catch {
+      // The status and status text still identify the failed request.
+    }
+    throw new Error(`Road data proxy returned ${response.status} ${response.statusText}${responseDetail ? ` — ${responseDetail}` : ''}`)
   }
 
-  if (!elements) {
-    throw new Error(`All road graph providers failed. ${lastError?.message ?? ''}`.trim())
-  }
+  const payload = await response.json()
+  if (!Array.isArray(payload.elements)) throw new Error('Road data proxy returned an invalid graph response')
 
-  return { ...graphFromElements(elements), bounds }
+  return { ...graphFromElements(payload.elements), bounds }
 }
