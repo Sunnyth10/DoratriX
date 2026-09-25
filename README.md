@@ -5,7 +5,7 @@
 **[🔴 Live Demo →](https://doratri-34jva1302-sunnyboi0010-6275s-projects.vercel.app/)**
 ---
 
-![DoratriX in action](./readme-assets/demo.gif)
+![DoratriX Demo](./demo.gif)
 
 ---
 
@@ -39,7 +39,7 @@ We are not trying to dethrone Google. We're trying to show you the machine room 
 
 Watch the panel on the right: **Dijkstra explores 1,738 nodes. A\* explores 519.** Same destination. Same correct 2.92 km answer. Wildly different amount of effort.
 
-![DoratriX hero screenshot with live stats](./readme-assets/hero.png)
+![DoratriX Demo](./hero.png)
 
 That's not a mocked-up stat for marketing purposes — that's a real search, on a real street network, with the receipts to prove A* isn't just hype.
 
