@@ -3,6 +3,7 @@
 ### *Find Shortest Paths. Visualize the Journey.*
 
 **[🔴 Live Demo →](https://doratri-34jva1302-sunnyboi0010-6275s-projects.vercel.app/)**
+---
 
 ![DoratriX in action](./readme-assets/demo.gif)
 
