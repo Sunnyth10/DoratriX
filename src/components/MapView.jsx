@@ -84,6 +84,7 @@ function MapFocus({ request }) {
 }
 
 export default function MapView() {
+  const debugAvailable = new URLSearchParams(window.location.search).get('debug') === 'true'
   const [graph, setGraph] = useState(null)
   const [startNodeId, setStartNodeId] = useState(null)
   const [endNodeId, setEndNodeId] = useState(null)
@@ -428,7 +429,7 @@ export default function MapView() {
           </div>
           {locationError && <span role="alert">{locationError}</span>}
         </form>
-        <button
+        {debugAvailable && <button
           className="debug-button"
           type="button"
           aria-pressed={debugMode}
@@ -443,7 +444,7 @@ export default function MapView() {
             <span>Debug Mode: {debugMode ? 'On' : 'Off'}</span>
           </span>
           <span className={`toggle-switch ${debugMode ? 'is-on' : ''}`} aria-hidden="true"><span /></span>
-        </button>
+        </button>}
         <button
           className="path-button"
           type="button"
@@ -648,6 +649,9 @@ export default function MapView() {
           <i className="legend-icon legend-end" aria-hidden="true" />
           End
         </span>
+        <a className="legend-attribution" href="https://www.openstreetmap.org/copyright">
+          © OpenStreetMap contributors
+        </a>
       </div>
     </div>
   )

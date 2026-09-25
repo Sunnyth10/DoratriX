@@ -1,5 +1,6 @@
 const EARTH_RADIUS_METERS = 6_371_000
 export const MAX_SNAP_METERS = 75
+// TODO(Phase 11): consider kdbush/rbush if the graph grows beyond linear scans.
 const NON_WALKABLE_HIGHWAYS = new Set([
   'motorway',
   'motorway_link',
@@ -313,9 +314,9 @@ async function fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })
 
 export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75 } = {}) {
   const bounds = boundingBox(center, halfSideKilometers)
-  if (import .meta.env.DEV){
+  if (import.meta.env.DEV) {
     try{
-      return { ...(await fetchOfficialOsmRoadGraph(center,{signal, halfSideKilometers})), bounds }
+      return { ...(await fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })), bounds }
     }catch(error){
       if (error.name ==='AbortError')throw error
       console.warn('Official OSM map request failed; trying overpass provider:', error)

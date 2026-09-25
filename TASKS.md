@@ -31,7 +31,7 @@ Legend: `[x]` done · `[~]` in progress / needs a final pass · `[ ]` not starte
 - [x] Road network drawn as thin polylines to visually confirm parsing
 - [x] **Bug found & fixed:** intersection nodes not merging correctly, causing bogus detours
 - [x] **Bug found & fixed:** disconnected road segments (split OSM ways not linking)
-- [~] Widen `highway` type filter to catch smaller connecting roads (residential, service, unclassified) — confirm this was actually widened, not just diagnosed
+- [~] Widen `highway` type filter to catch smaller connecting roads (residential, service, unclassified, living_street) — query/parser admit them; real-area network-point and route check pending
 
 ---
 
@@ -96,7 +96,7 @@ Legend: `[x]` done · `[~]` in progress / needs a final pass · `[ ]` not starte
 - [x] Rebranded as **DoratriX** — logo, tagline, header
 - [x] Fixed network-node styling (smaller, semi-transparent, less "clumped dark mass" when zoomed out)
 - [x] Recovered from a broken redesign via `git stash` — lesson learned, logic and styling now requested as separate prompts going forward
-- [ ] Full functionality audit after the latest redesign (click, drag, clear, debug toggle, both algorithms, play/pause/reset, slider) — confirm nothing silently broke again
+- [ ] Full functionality audit after the latest redesign (click, drag, clear, debug toggle, both algorithms, play/pause/reset, slider) — pending live browser run
 - [ ] Consolidate "Find Shortest Path" and "Compare Algorithms" into a single mode selector + one primary action button
 - [ ] Subtle UI micro-animations (button press feedback, marker drop-in, card hover states)
 
@@ -104,11 +104,11 @@ Legend: `[x]` done · `[~]` in progress / needs a final pass · `[ ]` not starte
 
 ## 🧹 Phase 10 — Cleanup & Hardening
 
-- [ ] Remove or gate Debug Mode behind a hidden flag (`?debug=true`) — it's a dev tool, not a user-facing feature
+- [x] Gate Debug Mode behind a hidden flag (`?debug=true`) — row only renders for `debug=true`
 - [ ] Performance: swap the linear nearest-node scan for a spatial index (`kdbush` or `rbush`) once bounding box grows
 - [ ] Loading states everywhere a fetch happens (Overpass, Nominatim) — no frozen-looking UI
-- [ ] Mobile responsiveness pass — real phone or DevTools device emulation
-- [ ] Attribution check — OpenStreetMap + Nominatim usage policy compliance, visible but unobtrusive
+- [~] Mobile responsiveness pass — narrow controls scroll, touch targets enlarged, legend and attribution separated; live 375px/414px emulation pending
+- [x] Attribution check — linked OpenStreetMap credit visible in both Leaflet control and legend
 
 ---
 
@@ -120,6 +120,8 @@ Legend: `[x]` done · `[~]` in progress / needs a final pass · `[ ]` not starte
 - [x] `ARCHITECTURE.md` — the how, under the hood
 - [ ] Deploy to GitHub Pages / Vercel — get a real, shareable live link
 - [ ] Final end-to-end test on the deployed version (not just localhost)
+
+**Phase 10 verification note:** `npm run build` passes. Live mobile device emulation and the Phase 9 interaction checklist still need a browser run; this workspace had no Chromium/Chrome/Playwright executable available.
 
 ---
 
