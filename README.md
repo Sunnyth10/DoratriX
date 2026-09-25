@@ -87,7 +87,7 @@ Want the deep-dive, file-by-file breakdown with actual code excerpts? Check `ARC
 
 ```bash
 git clone <this-repo-url>
-cd practice123
+cd DoratriX
 npm install
 npm run dev
 ```
