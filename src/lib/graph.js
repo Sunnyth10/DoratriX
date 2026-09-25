@@ -16,6 +16,8 @@ const DEVELOPMENT_OVERPASS_ENDPOINTS = [
   { name: 'overpass.nchc.org.tw', path: '/overpass-nchc' },
 ]
 const ROAD_DATA_TIMEOUT_MS = 30_000
+let staticRoadGraph
+let staticRoadGraphPromise
 
 async function fetchRoadData(url, { signal, ...options }) {
   const controller = new AbortController()
@@ -220,7 +222,7 @@ export function isLocationInGraphBounds(graph, { lat, lng }) {
   )
 }
 
-function graphFromElements(elements) {
+export function graphFromElements(elements) {
   const pointsById = new Map(
     elements
       .filter((element) => element.type === 'node')
@@ -316,8 +318,92 @@ async function fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })
   return graphFromElements(parseOsmMapXml(await response.text()))
 }
 
+async function fetchBundledHyderabadGraph() {
+  if (staticRoadGraph) return staticRoadGraph
+  if (!staticRoadGraphPromise) {
+    staticRoadGraphPromise = (async () => {
+      const response = await fetchRoadData('/road-data/hyderabad.json', {})
+      if (!response.ok) throw new Error(`Bundled Hyderabad graph returned ${response.status} ${response.statusText}`)
+      const graph = await response.json()
+      if (!graph.bounds || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+        throw new Error('Bundled Hyderabad graph has an invalid format')
+      }
+      if (graph.format === 'doratrix-compact-graph-v1') {
+        graph.nodes = graph.nodes.map(([id, lat, lng]) => ({ id, lat, lng }))
+        graph.edges = graph.edges.map(([from, to, weight]) => ({
+          id: [from, to].sort((a, b) => a - b).join(':'),
+          from,
+          to,
+          weight,
+        }))
+      }
+      return graph
+    })()
+  }
+
+  try {
+    staticRoadGraph = await staticRoadGraphPromise
+    return staticRoadGraph
+  } catch (error) {
+    staticRoadGraphPromise = null
+    if (error.name === 'AbortError') throw error
+    console.warn('Could not load bundled Hyderabad road graph; using live provider:', error)
+    return null
+  }
+}
+
+function boundsFitWithin(inner, outer) {
+  return inner.south >= outer.south && inner.west >= outer.west && inner.north <= outer.north && inner.east <= outer.east
+}
+
+export function graphWithinBounds(graph, bounds) {
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]))
+  const includesNode = (node) => node && node.lat >= bounds.south && node.lat <= bounds.north && node.lng >= bounds.west && node.lng <= bounds.east
+  const edges = graph.edges.filter((edge) => includesNode(nodesById.get(edge.from)) || includesNode(nodesById.get(edge.to)))
+  const nodeIds = new Set(edges.flatMap((edge) => [edge.from, edge.to]))
+  const adjacency = new Map([...nodeIds].map((id) => [id, []]))
+  for (const edge of edges) {
+    adjacency.get(edge.from).push(edge.to)
+    adjacency.get(edge.to).push(edge.from)
+  }
+
+  let largestComponent = []
+  const visited = new Set()
+  for (const nodeId of nodeIds) {
+    if (visited.has(nodeId)) continue
+    const component = [nodeId]
+    visited.add(nodeId)
+    for (let index = 0; index < component.length; index += 1) {
+      for (const neighbor of adjacency.get(component[index])) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor)
+          component.push(neighbor)
+        }
+      }
+    }
+    if (component.length > largestComponent.length) largestComponent = component
+  }
+
+  const connectedIds = new Set(largestComponent)
+  return {
+    nodes: [...connectedIds].map((id) => nodesById.get(id)),
+    edges: edges.filter((edge) => connectedIds.has(edge.from) && connectedIds.has(edge.to)),
+  }
+}
+
 export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75 } = {}) {
   const bounds = boundingBox(center, halfSideKilometers)
+  const bundledGraph = await fetchBundledHyderabadGraph()
+  if (signal?.aborted) {
+    const error = new Error('Road graph request was canceled')
+    error.name = 'AbortError'
+    throw error
+  }
+  if (bundledGraph && boundsFitWithin(bounds, bundledGraph.bounds)) {
+    const localGraph = graphWithinBounds(bundledGraph, bounds)
+    if (localGraph.nodes.length && localGraph.edges.length) return { ...localGraph, bounds }
+  }
+
   if (import.meta.env.DEV) {
     try{
       return { ...(await fetchOfficialOsmRoadGraph(center, { signal, halfSideKilometers })), bounds }
