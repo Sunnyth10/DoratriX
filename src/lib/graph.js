@@ -11,9 +11,9 @@ const NON_WALKABLE_HIGHWAYS = new Set([
 ])
 
 const DEVELOPMENT_OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.nchc.org.tw/api/interpreter',
+  { name: 'overpass-api.de', path: '/overpass-de' },
+  { name: 'overpass.private.coffee', path: '/overpass-private-coffee' },
+  { name: 'overpass.nchc.org.tw', path: '/overpass-nchc' },
 ]
 const ROAD_DATA_TIMEOUT_MS = 30_000
 
@@ -338,13 +338,13 @@ export async function fetchRoadGraph(center, { signal, halfSideKilometers = 0.75
     let lastError
     for (const endpoint of DEVELOPMENT_OVERPASS_ENDPOINTS) {
       try {
-        response = await fetchRoadData(`${endpoint}?data=${encodeURIComponent(query)}`, { signal })
+        response = await fetchRoadData(`${endpoint.path}/api/interpreter?data=${encodeURIComponent(query)}`, { signal })
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
         break
       } catch (error) {
         if (error.name === 'AbortError') throw error
         lastError = error
-        console.warn(`Development Overpass request failed via ${endpoint} (${error.name}): ${error.message}`, error)
+        console.warn(`Development Overpass request failed via ${endpoint.name} (${error.name}): ${error.message}`, error)
       }
     }
     if (!response?.ok) {
